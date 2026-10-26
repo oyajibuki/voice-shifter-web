@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ボイスシフター Web</title>
+<meta name="description" content="録音した声を AI で別人の声に変換します。">
+<meta name="theme-color" content="#120d29">
+<style>
+  :root {
+    --bg-top: #120d29;
+    --bg-bottom: #05050f;
+    --card: rgba(255, 255, 255, 0.06);
+    --tile: rgba(255, 255, 255, 0.05);
+    --text: #ffffff;
+    --sub: rgba(235, 235, 245, 0.6);
+    --accent: #a855f7;
+    --accent-soft: rgba(168, 85, 247, 0.35);
+    --danger: #ff453a;
+    --radius: 20px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; }
+  body {
+    min-height: 100vh;
+    background: linear-gradient(180deg, var(--bg-top), var(--bg-bottom)) fixed;
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 520px; margin: 0 auto; padding: 0 16px 48px; }
+  header {
+    display: flex; align-items: center; justify-content: center; position: relative;
+    height: 56px; font-weight: 700; font-size: 17px;
+  }
+  header a.ios {
+    position: absolute; right: 0; font-size: 12px; font-weight: 600; color: var(--text);
+    text-decoration: none; padding: 7px 12px; border-radius: 999px; background: var(--card);
+  }
+  .card {
+    background: var(--card); border-radius: var(--radius); padding: 16px; margin-top: 16px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  .card h2 { margin: 0; font-size: 17px; }
+  .caption { margin: 0; font-size: 12px; color: var(--sub); line-height: 1.5; }
+  .disabled { opacity: 0.4; pointer-events: none; }
+
+  /* 1. 声を入れる */
+  .drop {
+    border: 2px dashed rgba(255, 255, 255, 0.18); border-radius: 16px; padding: 22px 12px;
+    text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop strong { display: block; font-size: 15px; margin-bottom: 4px; }
+  .row { display: flex; gap: 10px; }
+  .row > * { flex: 1; }
+  .file-name { font-size: 13px; color: var(--sub); text-align: center; word-break: break-all; }
+
+  button {
+    font: inherit; color: var(--text); border: 0; cursor: pointer;
+    border-radius: 999px; padding: 12px 16px; font-weight: 600; font-size: 15px;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  button.primary { background: var(--accent); }
+  button.primary.rec { background: var(--danger); }
+  button.bordered { background: rgba(255, 255, 255, 0.1); }
+  button:disabled { opacity: 0.4; cursor: default; }
+
+  /* 2. 声を選ぶ */
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .tile {
+    background: var(--tile); border-radius: 14px; min-height: 64px; padding: 8px 4px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+    border: 2px solid transparent; font-size: 12px; font-weight: 700;
+  }
+  .tile .emoji { font-size: 22px; }
+  .tile.selected { background: var(--accent-soft); border-color: var(--accent); }
+
+  /* 3. 聞く */
+  .gauge { display: flex; flex-direction: column; gap: 4px; }
+  .gauge input[type=range] { width: 100%; accent-color: var(--accent); }
+  .gauge .labels { display: flex; justify-content: space-between; font-size: 12px; color: var(--sub); font-variant-numeric: tabular-nums; }
+  progress { width: 100%; height: 6px; appearance: none; border: 0; border-radius: 3px; overflow: hidden; background: rgba(255,255,255,.1); }
+  progress::-webkit-progress-bar { background: rgba(255,255,255,.1); }
+  progress::-webkit-progress-value { background: var(--accent); }
+  progress::-moz-progress-bar { background: var(--accent); }
+
+  .slider-row { display: flex; flex-direction: column; gap: 2px; }
+  .slider-row .head { display: flex; justify-content: space-between; font-size: 15px; }
+  .slider-row .head span:last-child { color: var(--sub); font-variant-numeric: tabular-nums; }
+  .slider-row input { width: 100%; accent-color: var(--accent); }
+
+  .error { color: var(--danger); font-size: 13px; }
+  a.download { text-decoration: none; }
+  footer { margin-top: 28px; text-align: center; font-size: 11px; color: var(--sub); line-height: 1.6; }
+  footer a { color: var(--sub); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    ボイスシフター Web
+    <a class="ios" href="#" id="iosLink" hidden>iOS版</a>
+  </header>
+
+  <!-- 1. 声を入れる -->
+  <section class="card">
+    <h2>1. 変えたい声を入れる</h2>
+    <p class="caption">スマホや PC で録った音声ファイル（mp3 / m4a / wav など、最大3分）を選ぶか、ここで録音します。無料サーバーで動かしているので、変換には声の長さの数倍の時間がかかります。</p>
+    <div class="drop" id="drop" tabindex="0" role="button" aria-label="音声ファイルを選ぶ">
+      <strong>ファイルを選ぶ</strong>
+      <span class="caption">またはここにドラッグ＆ドロップ</span>
+    </div>
+    <input type="file" id="file" accept="audio/*,video/*" hidden>
+    <button class="primary" id="recBtn">⏺ ここで録音する</button>
+    <div class="gauge" id="recGauge" hidden>
+      <progress id="recProgress" max="180" value="0"></progress>
+      <div class="labels"><span>録音中</span><span id="recTime">0:00 / 3:00</span></div>
+    </div>
+    <div class="file-name" id="fileName" hidden></div>
+  </section>
+
+  <!-- 2. 声を選ぶ -->
+  <section class="card disabled" id="voiceCard">
+    <h2>2. なりたい声を選ぶ</h2>
+    <div class="grid" id="voiceGrid"></div>
+    <p class="caption" id="voiceNote">AI がお手本の声の「声色」をまねて、あなたの話し方のまま言い直します。声の高さもお手本に寄ります。</p>
+    <input type="file" id="refFile" accept="audio/*" hidden>
+    <div class="slider-row">
+      <div class="head"><span>仕上がり</span><span id="qualityLabel">ふつう</span></div>
+      <input type="range" id="quality" min="0" max="2" step="1" value="1">
+    </div>
+    <button class="primary" id="convertBtn">変換する</button>
+    <div class="gauge" id="convGauge" hidden>
+      <progress id="convProgress" max="1" value="0"></progress>
+      <div class="labels"><span id="convState">待ち合わせ中…</span><span id="convPct">0%</span></div>
+    </div>
+    <div class="error" id="error" hidden></div>
+  </section>
+
+  <!-- 3. 聞く・保存 -->
+  <section class="card disabled" id="listenCard">
+    <h2>3. 聞く・保存する</h2>
+    <div class="row">
+      <button class="bordered" id="playOriginal">▶ 元の声</button>
+      <button class="bordered" id="playConverted">▶ 変換後</button>
+    </div>
+    <div class="gauge" id="playGauge" hidden>
+      <input type="range" id="seek" min="0" max="1" step="0.01" value="0">
+      <div class="labels"><span id="playLabel">再生中</span><span id="playTime">0:00 / 0:00</span></div>
+    </div>
+    <a class="download" id="download" download="voice-shifter.wav" hidden>
+      <button class="primary" style="width:100%">⬇ 変換後の声を保存する</button>
+    </a>
+  </section>
+
+  <footer>
+    音声は変換のためだけにサーバーへ送り、変換が終わると削除します。<br>
+    他人になりすます目的では使わないでください。<br>
+    AI: <a href="https://github.com/Plachtaa/seed-vc" target="_blank" rel="noopener">Seed-VC</a> (GPL-3.0)
+  </footer>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = { file: null, voice: null, refFile: null, jobId: null, playing: null };
+const QUALITY = [
+  { label: "速い", steps: 10 },
+  { label: "ふつう", steps: 25 },
+  { label: "丁寧", steps: 50 },
+];
+const audio = new Audio();
+let originalURL = null, convertedURL = null;
+
+const clock = (t) => {
+  t = Math.max(0, Math.floor(t || 0));
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+};
+const showError = (msg) => { $("error").textContent = msg; $("error").hidden = !msg; };
+
+// iOS版リンク（公開後に URL を入れる）
+const IOS_URL = "";
+if (IOS_URL) { $("iosLink").href = IOS_URL; $("iosLink").hidden = false; }
+
+// ---------- 1. 声を入れる ----------
+function setSource(blob, name) {
+  state.file = blob;
+  if (originalURL) URL.revokeObjectURL(originalURL);
+  originalURL = URL.createObjectURL(blob);
+  $("fileName").textContent = `🎙️ ${name}`;
+  $("fileName").hidden = false;
+  $("voiceCard").classList.remove("disabled");
+  $("listenCard").classList.add("disabled");
+  showError("");
+}
+$("drop").onclick = () => $("file").click();
+$("drop").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") $("file").click(); };
+$("file").onchange = () => { const f = $("file").files[0]; if (f) setSource(f, f.name); };
+["dragenter", "dragover"].forEach((t) => $("drop").addEventListener(t, (e) => { e.preventDefault(); $("drop").classList.add("over"); }));
+["dragleave", "drop"].forEach((t) => $("drop").addEventListener(t, (e) => { e.preventDefault(); $("drop").classList.remove("over"); }));
+$("drop").addEventListener("drop", (e) => { const f = e.dataTransfer.files[0]; if (f) setSource(f, f.name); });
+
+let recorder = null, recTimer = null;
+$("recBtn").onclick = async () => {
+  if (recorder) { recorder.stop(); return; }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: true, autoGainControl: true } });
+    const chunks = [];
+    recorder = new MediaRecorder(stream);
+    recorder.ondataavailable = (e) => chunks.push(e.data);
+    recorder.onstop = () => {
+      stream.getTracks().forEach((t) => t.stop());
+      clearInterval(recTimer);
+      $("recGauge").hidden = true;
+      $("recBtn").textContent = "⏺ 録り直す";
+      $("recBtn").classList.remove("rec");
+      setSource(new Blob(chunks, { type: recorder.mimeType }), "ここで録音した声");
+      recorder = null;
+    };
+    recorder.start();
+    const start = Date.now();
+    $("recGauge").hidden = false;
+    $("recBtn").textContent = "⏹ 録音を止める";
+    $("recBtn").classList.add("rec");
+    recTimer = setInterval(() => {
+      const t = (Date.now() - start) / 1000;
+      $("recProgress").value = t;
+      $("recTime").textContent = `${clock(t)} / 3:00`;
+      if (t >= 180) recorder.stop();
+    }, 100);
+  } catch (e) {
+    showError("マイクを使えませんでした。ブラウザのマイク許可を確認してください。");
+  }
+};
+
+// ---------- 2. 声を選ぶ ----------
+async function loadVoices() {
+  const res = await fetch("api/voices");
+  const voices = await res.json();
+  voices.push({ id: "custom", emoji: "📁", name: "自分で用意" });
+  $("voiceGrid").innerHTML = "";
+  voices.forEach((v) => {
+    const b = document.createElement("button");
+    b.className = "tile";
+    b.innerHTML = `<span class="emoji">${v.emoji}</span><span>${v.name}</span>`;
+    b.onclick = () => {
+      if (v.id === "custom") { $("refFile").click(); return; }
+      selectVoice(v.id, b);
+    };
+    b.dataset.id = v.id;
+    $("voiceGrid").appendChild(b);
+  });
+  const first = $("voiceGrid").querySelector(".tile");
+  if (first) selectVoice(first.dataset.id, first);
+}
+function selectVoice(id, el) {
+  state.voice = id;
+  document.querySelectorAll(".tile").forEach((t) => t.classList.toggle("selected", t === el));
+  $("voiceNote").textContent = id === "custom"
+    ? `お手本: ${state.refFile.name}（本人の許可がある声だけを使ってください）`
+    : "AI がお手本の声の「声色」をまねて、あなたの話し方のまま言い直します。声の高さもお手本に寄ります。";
+}
+$("refFile").onchange = () => {
+  const f = $("refFile").files[0];
+  if (!f) return;
+  state.refFile = f;
+  selectVoice("custom", $("voiceGrid").querySelector('[data-id="custom"]'));
+};
+$("quality").oninput = () => { $("qualityLabel").textContent = QUALITY[+$("quality").value].label; };
+
+$("convertBtn").onclick = async () => {
+  if (!state.file || !state.voice) return;
+  showError("");
+  stopPlayback();
+  const form = new FormData();
+  form.append("source", state.file, state.file.name || "recording.webm");
+  form.append("voice", state.voice);
+  if (state.voice === "custom") form.append("reference", state.refFile, state.refFile.name);
+  form.append("steps", QUALITY[+$("quality").value].steps);
+  $("convertBtn").disabled = true;
+  $("convGauge").hidden = false;
+  $("convProgress").value = 0;
+  $("convState").textContent = "アップロード中…";
+  $("convPct").textContent = "";
+  try {
+    const res = await fetch("api/convert", { method: "POST", body: form });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.detail || "変換を始められませんでした。");
+    state.jobId = body.id;
+    pollJob();
+  } catch (e) {
+    showError(e.message);
+    $("convertBtn").disabled = false;
+    $("convGauge").hidden = true;
+  }
+};
+
+async function pollJob() {
+  try {
+    const res = await fetch(`api/jobs/${state.jobId}`);
+    const job = await res.json();
+    if (!res.ok) throw new Error(job.detail || "変換の状態を取得できませんでした。");
+    $("convProgress").value = job.progress;
+    $("convPct").textContent = `${Math.round(job.progress * 100)}%`;
+    $("convState").textContent = job.status === "queued"
+      ? `順番待ち（前に${job.ahead}件）…`
+      : job.status === "running" ? "AI が声を変換中…" : "";
+    if (job.status === "done") {
+      const audioRes = await fetch(`api/jobs/${state.jobId}/audio`);
+      const blob = await audioRes.blob();
+      if (convertedURL) URL.revokeObjectURL(convertedURL);
+      convertedURL = URL.createObjectURL(blob);
+      $("download").href = convertedURL;
+      $("download").hidden = false;
+      $("listenCard").classList.remove("disabled");
+      $("convGauge").hidden = true;
+      $("convertBtn").disabled = false;
+      $("convertBtn").textContent = "この設定で変換し直す";
+      play("converted");
+      return;
+    }
+    if (job.status === "error") throw new Error(job.error || "変換に失敗しました。");
+    setTimeout(pollJob, 1000);
+  } catch (e) {
+    showError(e.message);
+    $("convertBtn").disabled = false;
+    $("convGauge").hidden = true;
+  }
+}
+
+// ---------- 3. 聞く ----------
+function play(which) {
+  if (state.playing === which) { stopPlayback(); return; }
+  audio.src = which === "original" ? originalURL : convertedURL;
+  audio.play();
+  state.playing = which;
+  $("playLabel").textContent = which === "original" ? "元の声を再生中" : "変換後を再生中";
+  $("playGauge").hidden = false;
+  $("playOriginal").textContent = which === "original" ? "⏹ 元の声" : "▶ 元の声";
+  $("playConverted").textContent = which === "converted" ? "⏹ 変換後" : "▶ 変換後";
+}
+function stopPlayback() {
+  audio.pause();
+  state.playing = null;
+  $("playGauge").hidden = true;
+  $("playOriginal").textContent = "▶ 元の声";
+  $("playConverted").textContent = "▶ 変換後";
+}
+$("playOriginal").onclick = () => play("original");
+$("playConverted").onclick = () => play("converted");
+audio.onended = stopPlayback;
+audio.ontimeupdate = () => {
+  $("seek").max = audio.duration || 1;
+  $("seek").value = audio.currentTime;
+  $("playTime").textContent = `${clock(audio.currentTime)} / ${clock(audio.duration)}`;
+};
+$("seek").oninput = () => { audio.currentTime = +$("seek").value; };
+
+loadVoices().catch(() => showError("サーバーに接続できませんでした。少し待ってから再読み込みしてください（起動に数分かかることがあります）。"));
+</script>
+</body>
+</html>

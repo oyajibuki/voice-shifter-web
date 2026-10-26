@@ -1,0 +1,6 @@
+[
+  {"id": "low", "emoji": "🐻", "name": "低め", "file": "low.wav"},
+  {"id": "calm", "emoji": "🌙", "name": "落ち着き", "file": "calm.wav"},
+  {"id": "bright", "emoji": "☀️", "name": "明るめ", "file": "bright.wav"},
+  {"id": "high", "emoji": "🌸", "name": "高め", "file": "high.wav"}
+]
