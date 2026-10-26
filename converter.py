@@ -18,8 +18,15 @@ import torchaudio
 import librosa
 import yaml
 
+import time
+
 device = torch.device("cpu")
-torch.set_num_threads(max(1, os.cpu_count() or 1))
+# Cloud Run ではマシン全体の CPU 数が見えることがあり、割り当て（4）を超えてスレッドを立てると逆に遅くなる。
+# 割り当て数は環境変数で渡す
+THREADS = int(os.environ.get("TORCH_THREADS", "4"))
+torch.set_num_threads(THREADS)
+torch.set_num_interop_threads(1)
+print(f"cpu_count={os.cpu_count()} threads={THREADS}", flush=True)
 
 SR = 22050
 HOP = 256
@@ -137,6 +144,7 @@ def convert(source_path, reference_path, steps=25, cfg_rate=0.7, progress=lambda
     """source の話し方のまま、reference の声色に変える。22.05kHz の numpy 配列を返す"""
     m = load()
     model, to_mel = m["model"], m["to_mel"]
+    t0 = time.time()
 
     source = librosa.load(source_path, sr=SR)[0]
     ref = librosa.load(reference_path, sr=SR)[0][: SR * 25]  # お手本は 25 秒まで使う
@@ -149,6 +157,7 @@ def convert(source_path, reference_path, steps=25, cfg_rate=0.7, progress=lambda
     s_alt = _semantic_long(m["semantic"], src_16k)
     s_ori = m["semantic"](ref_16k)
     progress(0.1)
+    t1 = time.time()
 
     mel = to_mel(source.float())
     mel2 = to_mel(ref.float())
@@ -189,4 +198,7 @@ def convert(source_path, reference_path, steps=25, cfg_rate=0.7, progress=lambda
         done += target.size(2) - overlap_frames
         progress(0.1 + 0.88 * min(1.0, done / total))
     progress(1.0)
-    return np.concatenate(chunks)
+    out = np.concatenate(chunks)
+    print(f"convert: {len(out) / SR:.1f}s audio, whisper {t1 - t0:.1f}s, total {time.time() - t0:.1f}s, steps {steps}",
+          flush=True)
+    return out

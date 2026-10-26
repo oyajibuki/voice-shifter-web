@@ -1,7 +1,9 @@
 """ボイスシフター Web: 録音した声を Seed-VC で別人の声に変換する。
 
-無料 CPU 枠で動かすので、変換は1件ずつ順番に処理する（同時にやると両方遅くなる）。
-音声は変換のためだけに受け取り、結果を渡したら（または 30 分たったら）消す。
+Cloud Run（最大1台・リクエスト中だけ CPU が割り当たる課金）で動かす。
+- 変換は1件ずつ順番に処理する（同時にやると両方遅くなる）
+- 画面は変換の間 /run を開いたままにする。リクエストが無いと CPU が止められて変換が進まないため
+- 音声は変換のためだけに受け取り、30 分たったら消す
 """
 import json
 import queue
@@ -49,7 +51,6 @@ def duration(path: Path) -> float:
 
 
 def worker():
-    converter.load()
     while True:
         job_id = pending.get()
         job = jobs.get(job_id)
@@ -74,6 +75,8 @@ def worker():
             job["status"] = "error"
             job["error"] = f"変換に失敗しました（{type(e).__name__}）。別のファイルで試してください。"
             print("convert error:", repr(e), flush=True)
+        finally:
+            job["finished"].set()
 
 
 def janitor():
@@ -87,8 +90,12 @@ def janitor():
                 jobs.pop(job_id, None)
 
 
-threading.Thread(target=worker, daemon=True).start()
-threading.Thread(target=janitor, daemon=True).start()
+@app.on_event("startup")
+def startup():
+    # 読み込み終わるまで待ち受けを始めない（Cloud Run は待ち受けが始まってから要求を回してくる）
+    converter.load()
+    threading.Thread(target=worker, daemon=True).start()
+    threading.Thread(target=janitor, daemon=True).start()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -143,11 +150,22 @@ async def convert(source: UploadFile = File(...), voice: str = Form(...),
     jobs[job_id] = {
         "status": "queued", "progress": 0.0, "created": time.time(), "dir": d,
         "source": str(src), "reference": str(ref), "steps": max(5, min(int(steps), 50)),
+        "finished": threading.Event(),
     }
     with lock:
         order.append(job_id)
     pending.put(job_id)
     return {"id": job_id}
+
+
+@app.post("/api/jobs/{job_id}/run")
+def job_run(job_id: str):
+    """変換が終わるまで返さない。これが開いている間は Cloud Run が CPU を割り当て続ける"""
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "変換が見つかりません。")
+    job["finished"].wait(timeout=55 * 60)
+    return {"status": job["status"]}
 
 
 @app.get("/api/jobs/{job_id}")

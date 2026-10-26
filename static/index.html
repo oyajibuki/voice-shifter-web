@@ -107,7 +107,7 @@
   <!-- 1. 声を入れる -->
   <section class="card">
     <h2>1. 変えたい声を入れる</h2>
-    <p class="caption">スマホや PC で録った音声ファイル（mp3 / m4a / wav など、最大3分）を選ぶか、ここで録音します。無料サーバーで動かしているので、変換には声の長さの数倍の時間がかかります。</p>
+    <p class="caption">スマホや PC で録った音声ファイル（mp3 / m4a / wav など、最大3分）を選ぶか、ここで録音します。変換には声の長さと同じ〜数倍の時間がかかります。しばらく使われていないと、最初の1回はサーバーの起動に1分ほどかかります。</p>
     <div class="drop" id="drop" tabindex="0" role="button" aria-label="音声ファイルを選ぶ">
       <strong>ファイルを選ぶ</strong>
       <span class="caption">またはここにドラッグ＆ドロップ</span>
@@ -288,6 +288,8 @@ $("convertBtn").onclick = async () => {
     const body = await res.json();
     if (!res.ok) throw new Error(body.detail || "変換を始められませんでした。");
     state.jobId = body.id;
+    // 変換が終わるまで開いたままにしておくリクエスト（これが無いとサーバーの CPU が止められる）
+    fetch(`api/jobs/${body.id}/run`, { method: "POST" }).catch(() => {});
     pollJob();
   } catch (e) {
     showError(e.message);
